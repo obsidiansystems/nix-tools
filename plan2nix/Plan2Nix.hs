@@ -76,7 +76,7 @@ writeDoc file doc =
      hClose handle
 
 plan2nix :: Args -> Plan -> IO NExpr
-plan2nix args (Plan { packages, extras, compilerVersion, compilerPackages }) = do
+plan2nix args (Plan { packages, extras, compilerId, compilerPackages }) = do
   -- TODO: this is an aweful hack and expects plan-to-nix to be
   -- called from the toplevel project directory.
   cwd <- getCurrentDirectory
@@ -110,14 +110,19 @@ plan2nix args (Plan { packages, extras, compilerVersion, compilerPackages }) = d
     "pkgs" $= ("hackage" ==> mkNonRecSet (
       [ "packages" $= (mkNonRecSet $ uncurry bind =<< Map.toList quotedPackages)
       , "compiler" $= mkNonRecSet
-        [ "version" $= mkStr compilerVersion
-        , "nix-name" $= mkStr ("ghc" <> Text.filter (/= '.') compilerVersion)
+        [ "version" $= mkStr (Text.dropWhile (not . isDigit) compilerId)
+        , "nix-name" $= mkStr nixName
         , "packages" $= mkNonRecSet (fmap (uncurry bind') $ Map.toList $ mapKeys quoted compilerPackages)
         ]
       ]))
     , "extras" $= ("hackage" ==> mkNonRecSet [ "packages" $= extras ])
     ]
  where
+  nixName =
+    let n = Text.filter (`notElem` ['-', '.']) compilerId
+    in  if "ghcjs" `Text.isPrefixOf` compilerId
+          then Text.take (Text.length "ghcjs" + 2) n -- GHCJS keys in the nix package set are of the form "ghcjs00"
+          else n
   quotedPackages = mapKeys quoted packages
   bind pkg (Just (Package { packageVersion, packageRevision, packageFlags })) =
     let verExpr      = mkSym "hackage" @. pkg @. quoted packageVersion
@@ -158,7 +163,7 @@ plan2nix args (Plan { packages, extras, compilerVersion, compilerPackages }) = d
             return $ fromString pkg $= mkPath False nix
 
 value2plan :: Value -> Plan
-value2plan plan = Plan { packages, extras, compilerVersion, compilerPackages }
+value2plan plan = Plan { packages, extras, compilerId, compilerPackages }
  where
   packages = fmap Just $ filterInstallPlan $ \pkg -> case ( pkg ^. key "type" . _String
                                               , pkg ^. key "style" . _String) of
@@ -208,7 +213,7 @@ value2plan plan = Plan { packages, extras, compilerVersion, compilerPackages }
       }
     _ -> Nothing
 
-  compilerVersion  = Text.dropWhile (not . isDigit) $ plan ^. key "compiler-id" . _String
+  compilerId  = plan ^. key "compiler-id" . _String
   compilerPackages = fmap Just $ filterInstallPlan $ \pkg -> if isJust (pkg ^? key "style" . _String)
     then Nothing
     else Just $ pkg ^. key "pkg-version" . _String

@@ -32,14 +32,14 @@ ltsPackages lts = do
     Right value -> pure $ plan2nix $ lts2plan value
 
 lts2plan :: Value -> Plan
-lts2plan lts = Plan { packages , compilerVersion , compilerPackages }
+lts2plan lts = Plan { packages , compilerId, compilerPackages }
  where
   packages = mappend compilerPackages' $ fmap Just $ lts ^. key "packages" . _Object <&> \v -> Package
     { packageVersion  = v ^. key "version" . _String
     , packageRevision = v ^? key "cabal-file-info" . key "hashes" . key "SHA256" . _String
     , packageFlags    = Map.mapMaybe (^? _Bool) $ v ^. key "constraints" . key "flags" . _Object
     }
-  compilerVersion = lts ^. key "system-info" . key "ghc-version" . _String
+  compilerId = "ghc-" <> (lts ^. key "system-info" . key "ghc-version" . _String)
   compilerPackages =
     (lts ^.  key "system-info" . key "core-packages" . _Object <&> (Just . (^. _String)))
     <> Map.fromList

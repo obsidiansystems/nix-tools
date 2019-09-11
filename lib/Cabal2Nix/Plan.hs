@@ -7,6 +7,7 @@ where
 import           Cabal2Nix.Util                           ( quoted
                                                           , bindPath
                                                           )
+import           Data.Char                                ( isDigit )
 import           Data.HashMap.Strict                      ( HashMap )
 import qualified Data.HashMap.Strict           as Map
 import           Data.List.NonEmpty                       ( NonEmpty (..) )
@@ -19,7 +20,7 @@ type Revision = Text -- Can be: rNUM, cabal file sha256, or "default"
 
 data Plan = Plan
   { packages :: HashMap Text (Maybe Package)
-  , compilerVersion :: Text
+  , compilerId :: Text
   , compilerPackages :: HashMap Text (Maybe Version)
   }
 
@@ -30,17 +31,22 @@ data Package = Package
   }
 
 plan2nix :: Plan -> NExpr
-plan2nix (Plan { packages, compilerVersion, compilerPackages }) =
+plan2nix (Plan { packages, compilerId, compilerPackages }) =
   mkFunction "hackage"
     . mkNonRecSet
     $ [ "packages" $= (mkNonRecSet $ uncurry bind =<< Map.toList quotedPackages)
       , "compiler" $= mkNonRecSet
-        [ "version" $= mkStr compilerVersion
-        , "nix-name" $= mkStr ("ghc" <> Text.filter (/= '.') compilerVersion)
+        [ "version" $= mkStr (Text.dropWhile (not . isDigit) compilerId)
+        , "nix-name" $= mkStr nixName
         , "packages" $= mkNonRecSet (fmap (uncurry bind') $ Map.toList $ mapKeys quoted compilerPackages)
         ]
       ]
  where
+  nixName =
+    let n = Text.filter (`notElem` ['-', '.']) compilerId
+    in  if "ghcjs" `Text.isPrefixOf` compilerId
+          then Text.take (Text.length "ghcjs" + 2) n -- GHCJS keys in the nix package set are of the form "ghcjs00"
+          else n
   quotedPackages = mapKeys quoted packages
   bind pkg (Just (Package { packageVersion, packageRevision, packageFlags })) =
     let verExpr      = mkSym "hackage" @. pkg @. quoted packageVersion
